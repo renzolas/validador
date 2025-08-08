@@ -19,39 +19,36 @@ st.title("📊 Validador de coincidencias entre archivos Excel")
 def validar_extension(nombre_archivo):
     return nombre_archivo.lower().endswith(('.xlsx', '.xlsm'))
 
-# Función para comparar celdas y resaltar diferencias
+# Función para comparar y resaltar en el archivo B
 def comparar_y_resaltar(archivo_a, archivo_b):
-    # Leer archivos con pandas
+    # Leer ambos archivos en pandas
     df_a = pd.read_excel(archivo_a, dtype=str, engine="openpyxl")
     df_b = pd.read_excel(archivo_b, dtype=str, engine="openpyxl")
 
-    # Convertir NaN a cadena vacía
+    # Reemplazar NaN por cadena vacía
     df_a = df_a.fillna("")
     df_b = df_b.fillna("")
 
-    # Cargar libro original para modificar formato
-    wb = load_workbook(archivo_a)
+    # Cargar archivo B en openpyxl para modificarlo
+    wb = load_workbook(archivo_b)
     ws = wb.active
 
-    # Definir color de relleno para errores
+    # Definir color de relleno para diferencias
     rojo = PatternFill(start_color="FF9999", end_color="FF9999", fill_type="solid")
 
-    # Comparar celda por celda
-    for fila in range(len(df_a)):
-        for col in range(len(df_a.columns)):
-            valor_a = str(df_a.iat[fila, col])
-            valor_b = str(df_b.iat[fila, col]) if fila < len(df_b) else ""
+    # Recorrer y comparar celda por celda
+    for fila in range(len(df_b)):
+        for col in range(len(df_b.columns)):
+            valor_a = str(df_a.iat[fila, col]) if fila < len(df_a) else ""
+            valor_b = str(df_b.iat[fila, col])
 
             if valor_a != valor_b:
-                # Resaltar celda en rojo
                 celda_excel = ws.cell(row=fila+2, column=col+1)  # +2 para ignorar encabezado
                 celda_excel.fill = rojo
-
-                # Comentario detallado
                 comentario_texto = f'Se esperaba encontrar "{valor_a}" y se encontró "{valor_b}"'
                 celda_excel.comment = Comment(comentario_texto, "Validador")
 
-    # Guardar en memoria
+    # Guardar resultado en memoria
     output = io.BytesIO()
     wb.save(output)
     output.seek(0)
@@ -61,7 +58,7 @@ def comparar_y_resaltar(archivo_a, archivo_b):
 # SUBIDA DE ARCHIVOS
 # ======================
 archivo_a = st.file_uploader("📂 Sube el Archivo A (referencia)", type=["xlsx", "xlsm"])
-archivo_b = st.file_uploader("📂 Sube el Archivo B (comparar)", type=["xlsx", "xlsm"])
+archivo_b = st.file_uploader("📂 Sube el Archivo B (comparar y modificar)", type=["xlsx", "xlsm"])
 
 if archivo_a and archivo_b:
     if validar_extension(archivo_a.name) and validar_extension(archivo_b.name):
@@ -70,14 +67,13 @@ if archivo_a and archivo_b:
             st.success("✅ Comparación completada")
 
             st.download_button(
-                label="📥 Descargar archivo con errores resaltados",
+                label="📥 Descargar archivo B validado",
                 data=resultado,
-                file_name="resultado_validacion.xlsx",
+                file_name="archivo_B_validado.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
     else:
         st.error("❌ Solo se permiten archivos con extensión .xlsx o .xlsm")
-
 
 
 
