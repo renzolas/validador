@@ -1,11 +1,13 @@
 import pandas as pd
+import streamlit as st
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill
 from openpyxl.comments import Comment
 from datetime import datetime
 import re
-import sys
+import tempfile
 import os
+import time
 
 # === VALIDACIONES POR TIPO ===
 def normalizar_columna(nombre):
@@ -47,34 +49,28 @@ tipos_columna = {
     "mes": "fecha_corta"
 }
 
-def validar_excel(archivo_a, archivo_b):
-    if not os.path.exists(archivo_a):
-        raise FileNotFoundError(f"No se encontró el archivo A: {archivo_a}")
-    if not os.path.exists(archivo_b):
-        raise FileNotFoundError(f"No se encontró el archivo B: {archivo_b}")
+def validar_excel(archivo_a_path, archivo_b_path):
+    df_a = pd.read_excel(archivo_a_path, sheet_name=0, dtype=str)
+    df_b = pd.read_excel(archivo_b_path, sheet_name=0, dtype=str)
 
-    # === CARGA LOS ARCHIVOS COMO DATAFRAMES ===
-    df_a = pd.read_excel(archivo_a, sheet_name=0, dtype=str)
-    df_b = pd.read_excel(archivo_b, sheet_name=0, dtype=str)
-
-    # === NORMALIZA ENCABEZADOS ===
     df_a.columns = [normalizar_columna(col) for col in df_a.columns]
     df_b.columns = [normalizar_columna(col) for col in df_b.columns]
 
-    # === VALIDA COLUMNAS FALTANTES ===
     faltantes = set(df_a.columns) - set(df_b.columns)
     if faltantes:
-        raise ValueError(f"❌ Faltan columnas en B: {faltantes}")
+        st.error(f"❌ Faltan columnas en B: {faltantes}")
+        return None
 
-    # === REORDENA COLUMNAS DE B PARA QUE COINCIDAN CON A ===
     df_b = df_b[df_a.columns]
 
-    # === CARGA EL ARCHIVO B COMO LIBRO DE EXCEL ===
-    wb = load_workbook(archivo_b)
+    wb = load_workbook(archivo_b_path)
     ws = wb.active
     rojo = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
 
-    # === VALIDACIÓN CELDA POR CELDA ===
+    total_celdas = df_a.shape[0] * df_a.shape[1]
+    progreso = 0
+    barra = st.progress(0)
+
     for fila in range(df_a.shape[0]):
         for col in range(df_a.shape[1]):
             valor_a = str(df_a.iat[fila, col]).strip()
@@ -88,30 +84,55 @@ def validar_excel(archivo_a, archivo_b):
             if not valor_b:
                 celda.fill = rojo
                 celda.comment = Comment("Celda vacía", "Validador")
-                continue
-
-            if valor_a != valor_b:
+            elif valor_a != valor_b:
                 celda.fill = rojo
                 celda.comment = Comment(
                     f'Valor diferente:\nEsperado: "{valor_a}"\nEncontrado: "{valor_b}"',
                     "Validador"
                 )
+            elif tipo_esperado in validadores and not validadores[tipo_esperado](valor_b):
+                celda.fill = rojo
+                celda.comment = Comment(f"Tipo inválido: se esperaba {tipo_esperado}", "Validador")
 
-            if tipo_esperado in validadores:
-                if not validadores[tipo_esperado](valor_b):
-                    celda.fill = rojo
-                    mensaje = f"Tipo inválido: se esperaba {tipo_esperado}"
-                    celda.comment = Comment(mensaje, "Validador")
+            # Actualizar barra de progreso
+            progreso += 1
+            barra.progress(int((progreso / total_celdas) * 100))
 
-    # === GUARDAR EL ARCHIVO VALIDADO COMO .xlsx ===
-    salida = archivo_b.rsplit(".", 1)[0] + "_validado.xlsx"
+    salida = archivo_b_path.replace(".xlsx", "_validado.xlsx")
     wb.save(salida)
-    print(f"\n✅ Validación completada. Archivo guardado como: {salida}")
+    return salida
 
-if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        print("Uso: python validador_excel.py archivo_a.xlsx archivo_b.xlsx")
-        sys.exit(1)
+# === STREAMLIT UI ===
+st.set_page_config(page_title="Validador de Excel", page_icon="📊")
+st.title("📊 Validador de Excel")
+st.markdown("### ¡Bienvenido! 👋")
+st.info("Esta herramienta compara dos archivos Excel, valida datos y resalta errores en **rojo** con comentarios.")
 
-    validar_excel(sys.argv[1], sys.argv[2])
+# Subir archivos
+archivo_a = st.file_uploader("📂 Sube el archivo A (referencia)", type=["xlsx"])
+archivo_b = st.file_uploader("📂 Sube el archivo B (validar)", type=["xlsx"])
+
+# Botón de validación
+if archivo_a and archivo_b:
+    if st.button("🚀 Ejecutar validación"):
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp_a, \
+             tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp_b:
+            tmp_a.write(archivo_a.read())
+            tmp_b.write(archivo_b.read())
+            tmp_a_path = tmp_a.name
+            tmp_b_path = tmp_b.name
+
+        salida = validar_excel(tmp_a_path, tmp_b_path)
+
+        if salida:
+            st.success("✅ Validación completada con éxito.")
+            with open(salida, "rb") as f:
+                st.download_button(
+                    "📥 Descargar archivo validado",
+                    f,
+                    file_name=os.path.basename(salida)
+                )
+else:
+    st.warning("Por favor, sube **ambos archivos** antes de ejecutar la validación.")
+
 
