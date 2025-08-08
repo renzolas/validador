@@ -2,94 +2,98 @@ import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill
 from openpyxl.comments import Comment
-import streamlit as st
-from io import BytesIO
 
 def comparar_y_resaltar(archivo_a, archivo_b):
-    df_a = pd.read_excel(archivo_a, dtype=str)
-    df_b = pd.read_excel(archivo_b, dtype=str)
+    # === Leer archivos como DataFrames ===
+    df_a = pd.read_excel(archivo_a, dtype=str).fillna("")
+    df_b = pd.read_excel(archivo_b, dtype=str).fillna("")
 
-    # Rellenar NaN para evitar errores
-    df_a = df_a.fillna("")
-    df_b = df_b.fillna("")
+    # === Alinear columnas por nombre ===
+    columnas_comunes = [col for col in df_a.columns if col in df_b.columns]
+    columnas_solo_a = [col for col in df_a.columns if col not in df_b.columns]
+    columnas_solo_b = [col for col in df_b.columns if col not in df_a.columns]
 
-    # Detectar columnas faltantes o sobrantes
-    columnas_a = set(df_a.columns)
-    columnas_b = set(df_b.columns)
+    # Crear copia de B para no modificar original
+    df_b_alineado = df_b.copy()
 
-    columnas_faltantes = columnas_a - columnas_b
-    columnas_sobrantes = columnas_b - columnas_a
+    # Agregar columnas faltantes en B
+    for col in columnas_solo_a:
+        df_b_alineado[col] = ""
 
-    # Alinear columnas para comparación
-    columnas_comunes = list(columnas_a & columnas_b)
-    df_a = df_a[columnas_comunes]
-    df_b = df_b[columnas_comunes]
+    # Mantener el orden de columnas como en A
+    columnas_finales = columnas_comunes + columnas_solo_a
+    df_b_alineado = df_b_alineado[columnas_finales]
 
-    # Cargar workbook B (porque ese será el exportado)
-    wb = load_workbook(archivo_b)
+    # === Alinear filas por clave (primera columna) ===
+    clave_col = df_a.columns[0]  # Usar la primera columna como clave
+    df_a_indexado = df_a.set_index(clave_col)
+    df_b_indexado = df_b_alineado.set_index(clave_col)
+
+    # Unir claves
+    todas_claves = sorted(set(df_a_indexado.index) | set(df_b_indexado.index))
+
+    # Crear libro para exportar
+    df_b_export = df_b_alineado.reindex(columns=columnas_finales)
+    ruta_export = "archivo_B_validado.xlsx"
+    df_b_export.to_excel(ruta_export, index=False)
+
+    # === Cargar libro con openpyxl ===
+    wb = load_workbook(ruta_export)
     ws = wb.active
 
-    rojo = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
+    # Colores
+    rojo = PatternFill(start_color="FF9999", end_color="FF9999", fill_type="solid")
 
-    # Marcar columnas faltantes y sobrantes
-    for col in columnas_faltantes:
-        nota = f"Columna faltante en archivo B"
-        # No hay columna física en B, así que no se pinta, solo se registra en log
-        st.warning(f"{nota}: {col}")
-
-    for col in columnas_sobrantes:
-        idx_col_b = list(df_b.columns).index(col) + 1
-        for fila in range(2, len(df_b) + 2):  # Asume fila 1 = encabezados
-            celda = ws.cell(row=fila, column=idx_col_b)
-            celda.fill = rojo
-            celda.comment = Comment(f"Columna adicional en archivo B", "Validador")
-
-    # Comparar valores y detectar filas faltantes o sobrantes
-    max_filas = max(len(df_a), len(df_b))
-    for fila in range(max_filas):
-        if fila >= len(df_a):
+    # === Comparar fila a fila ===
+    for clave in todas_claves:
+        if clave not in df_a_indexado.index:
             # Fila sobrante en B
-            for col_idx in range(1, len(df_b.columns) + 1):
-                celda = ws.cell(row=fila + 2, column=col_idx)
-                celda.fill = rojo
-                celda.comment = Comment("Fila adicional no presente en archivo A", "Validador")
-            continue
+            fila_ws = ws.max_row + 1
+            ws.append([clave] + [""] * (len(columnas_finales) - 1))
+            for col in range(1, len(columnas_finales) + 1):
+                ws.cell(row=fila_ws, column=col).fill = rojo
+                ws.cell(row=fila_ws, column=col).comment = Comment("Fila presente en B pero no en A", "Validador")
+        elif clave not in df_b_indexado.index:
+            # Fila faltante en B
+            fila_ws = ws.max_row + 1
+            ws.append([clave] + [""] * (len(columnas_finales) - 1))
+            for col in range(1, len(columnas_finales) + 1):
+                ws.cell(row=fila_ws, column=col).fill = rojo
+                ws.cell(row=fila_ws, column=col).comment = Comment("Fila presente en A pero no en B", "Validador")
+        else:
+            # Fila presente en ambos → comparar columnas
+            fila_a = df_a_indexado.loc[clave]
+            fila_b = df_b_indexado.loc[clave]
 
-        if fila >= len(df_b):
-            # Fila faltante en B → No se puede marcar porque no existe físicamente en archivo B
-            st.warning(f"Fila {fila+2} faltante en archivo B")
-            continue
+            # Si hay varias filas con la misma clave, convertir en lista
+            if isinstance(fila_a, pd.DataFrame):
+                fila_a = fila_a.iloc[0]
+            if isinstance(fila_b, pd.DataFrame):
+                fila_b = fila_b.iloc[0]
 
-        for col_idx, col_nombre in enumerate(df_a.columns, start=1):
-            valor_a = str(df_a.iat[fila, col_idx - 1])
-            valor_b = str(df_b.iat[fila, col_idx - 1])
+            # Buscar índice real en hoja Excel
+            fila_ws = list(df_b_export[clave_col]).index(clave) + 2  # +2 por encabezado y base 1
 
-            if valor_a != valor_b:
-                celda = ws.cell(row=fila + 2, column=col_idx)
-                celda.fill = rojo
-                celda.comment = Comment(f"Se esperaba '{valor_a}' y se encontró '{valor_b}'", "Validador")
+            for col_idx, col_name in enumerate(columnas_finales, start=1):
+                if col_name in columnas_solo_a:
+                    # Columna faltante en B
+                    ws.cell(row=fila_ws, column=col_idx).fill = rojo
+                    ws.cell(row=fila_ws, column=col_idx).comment = Comment("Columna presente en A pero no en B", "Validador")
+                elif col_name in columnas_solo_b:
+                    # Columna sobrante en B (en teoría no debería pasar por alineación, pero lo dejamos por seguridad)
+                    ws.cell(row=fila_ws, column=col_idx).fill = rojo
+                    ws.cell(row=fila_ws, column=col_idx).comment = Comment("Columna presente en B pero no en A", "Validador")
+                else:
+                    val_a = str(fila_a[col_name])
+                    val_b = str(fila_b[col_name])
+                    if val_a != val_b:
+                        ws.cell(row=fila_ws, column=col_idx).fill = rojo
+                        ws.cell(row=fila_ws, column=col_idx).comment = Comment(f"Se esperaba '{val_a}' y se encontró '{val_b}'", "Validador")
 
-    # Guardar archivo en memoria
-    output = BytesIO()
-    wb.save(output)
-    output.seek(0)
-    return output
+    wb.save(ruta_export)
+    return ruta_export
 
-# Interfaz Streamlit
-st.title("📊 Validador de Archivos Excel")
-archivo_a = st.file_uploader("Subir Archivo A (referencia)", type=["xls", "xlsx", "xlsm"])
-archivo_b = st.file_uploader("Subir Archivo B (validar)", type=["xls", "xlsx", "xlsm"])
-
-if archivo_a and archivo_b:
-    if st.button("Validar"):
-        resultado = comparar_y_resaltar(archivo_a, archivo_b)
-        st.success("Validación completada ✅")
-        st.download_button(
-            label="📥 Descargar archivo validado",
-            data=resultado,
-            file_name="archivo_B_validado.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-
-
+# === Ejemplo de uso ===
+# resultado = comparar_y_resaltar("archivo_A.xlsx", "archivo_B.xlsx")
+# print(f"Archivo exportado: {resultado}")
 
