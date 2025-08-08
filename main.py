@@ -1,148 +1,84 @@
-import pandas as pd
 import streamlit as st
+import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill
 from openpyxl.comments import Comment
-from datetime import datetime
-import re
 import tempfile
-import os
 import time
 
-# === VALIDACIONES POR TIPO ===
-def normalizar_columna(nombre):
-    return str(nombre).strip().lower()
-
-def es_numerico(valor):
-    return valor.isdigit()
-
-def es_texto(valor):
-    return bool(re.match(r"^[a-zA-ZáéíóúÁÉÍÓÚüÜñÑ\s]+$", valor))
-
-def es_alfanumerico(valor):
-    return bool(re.match(r"^[a-zA-Z0-9\s]+$", valor))
-
-def es_fecha(valor):
-    try:
-        datetime.strptime(valor, "%m/%d/%Y")
-        return True
-    except:
-        return False
-
-def es_fecha_corta(valor):
-    return bool(re.match(r"^(0[1-9]|1[0-2])\/\d{2}$", valor))
-
-validadores = {
-    "numerico": es_numerico,
-    "texto": es_texto,
-    "alfanumerico": es_alfanumerico,
-    "fecha": es_fecha,
-    "fecha_corta": es_fecha_corta
-}
-
-# === TIPOS ESPERADOS POR COLUMNA ===
-tipos_columna = {
-    "id": "numerico",
-    "nombre": "texto",
-    "codigo": "alfanumerico",
-    "fecha": "fecha",
-    "mes": "fecha_corta"
-}
-
+# --- Función de validación ---
 def validar_excel(archivo_a_path, archivo_b_path):
-    df_a = pd.read_excel(archivo_a_path, sheet_name=0, dtype=str)
-    df_b = pd.read_excel(archivo_b_path, sheet_name=0, dtype=str)
+    # Leer ambos archivos
+    df_a = pd.read_excel(archivo_a_path)
+    df_b = pd.read_excel(archivo_b_path)
 
-    df_a.columns = [normalizar_columna(col) for col in df_a.columns]
-    df_b.columns = [normalizar_columna(col) for col in df_b.columns]
-
-    faltantes = set(df_a.columns) - set(df_b.columns)
-    if faltantes:
-        st.error(f"❌ Faltan columnas en B: {faltantes}")
-        return None, None
-
-    df_b = df_b[df_a.columns]
-
-    wb = load_workbook(archivo_b_path, keep_vba=True)
+    # Cargar archivo B con openpyxl para poder modificarlo
+    wb = load_workbook(archivo_b_path)
     ws = wb.active
-    rojo = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
 
-    total_celdas = df_a.shape[0] * df_a.shape[1]
-    progreso = 0
-    barra = st.progress(0)
-    tiempo_estimado = total_celdas * 0.02  # 0.02 seg por celda aprox
-    texto_tiempo = st.empty()
+    # Ejemplo: comparar columna 1 de A con columna 1 de B
+    col_a = df_a.columns[0]
+    col_b = df_b.columns[0]
+    set_a = set(df_a[col_a])
 
-    for fila in range(df_a.shape[0]):
-        for col in range(df_a.shape[1]):
-            valor_a = str(df_a.iat[fila, col]).strip()
-            valor_b = str(df_b.iat[fila, col]).strip()
-            col_name = df_a.columns[col]
-            col_index_in_b = list(df_b.columns).index(col_name)
-            celda = ws.cell(row=fila+2, column=col_index_in_b+1)
+    for idx, valor in enumerate(df_b[col_b], start=2):
+        if valor not in set_a:
+            ws[f"A{idx}"].fill = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
+            ws[f"A{idx}"].comment = Comment("No coincide con archivo A", "Validador")
 
-            tipo_esperado = tipos_columna.get(col_name)
+    salida = "validado.xlsx"
+    wb.save(salida)
+    return salida
 
-            if not valor_b:
-                celda.fill = rojo
-                celda.comment = Comment("Celda vacía", "Validador")
-            elif valor_a != valor_b:
-                celda.fill = rojo
-                celda.comment = Comment(
-                    f'Valor diferente:\nEsperado: "{valor_a}"\nEncontrado: "{valor_b}"',
-                    "Validador"
-                )
-            elif tipo_esperado in validadores and not validadores[tipo_esperado](valor_b):
-                celda.fill = rojo
-                celda.comment = Comment(f"Tipo inválido: se esperaba {tipo_esperado}", "Validador")
+# --- Configuración de página ---
+st.set_page_config(page_title="Validador de Excel", page_icon="✅", layout="centered")
 
-            progreso += 1
-            porcentaje = int((progreso / total_celdas) * 100)
-            barra.progress(porcentaje)
-            tiempo_restante = tiempo_estimado * (1 - progreso / total_celdas)
-            texto_tiempo.text(f"⏳ Tiempo estimado restante: {tiempo_restante:.1f} segundos")
+# --- Mensaje de bienvenida ---
+st.title("✅ Validador de Archivos Excel")
+st.markdown("""
+¡Bienvenido al **Validador de Excel**!  
+Sube el **Archivo A** (referencia) y el **Archivo B** (validar).  
+Este sistema resaltará en rojo las celdas de B que **no estén en A**.
+""")
 
-            time.sleep(0.002)  # Simulación ligera para que se vea el avance
-
-    # Guardar con formato (.xlsx)
-    salida_xlsx = os.path.splitext(archivo_b_path)[0] + "_validado.xlsx"
-    wb.save(salida_xlsx)
-
-    # Guardar sin formato como .xls
-    salida_xls = os.path.splitext(archivo_b_path)[0] + "_validado.xls"
-    df_b.to_excel(salida_xls, index=False)
-
-    return salida_xlsx, salida_xls
-
-# === STREAMLIT UI ===
-st.set_page_config(page_title="Validador de Excel", page_icon="📊")
-st.title("📊 Validador de Excel")
-st.markdown("### ¡Bienvenido! 👋")
-st.info("Esta herramienta compara dos archivos Excel (.xlsx o .xlsm), valida datos y resalta errores en **rojo** con comentarios. "
-        "El archivo resultante puede descargarse en `.xlsx` (con formato) o `.xls` (sin formato, pero compatible con más sistemas).")
-
+# --- Subida de archivos ---
 archivo_a = st.file_uploader("📂 Sube el archivo A (referencia)", type=["xlsx", "xlsm"])
 archivo_b = st.file_uploader("📂 Sube el archivo B (validar)", type=["xlsx", "xlsm"])
 
+# --- Botón para iniciar validación ---
 if archivo_a and archivo_b:
-    if st.button("🚀 Ejecutar validación"):
-        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(archivo_a.name)[1]) as tmp_a, \
-             tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(archivo_b.name)[1]) as tmp_b:
+    if st.button("🚀 Iniciar validación"):
+        # Guardar archivos temporales
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp_a:
             tmp_a.write(archivo_a.read())
-            tmp_b.write(archivo_b.read())
             tmp_a_path = tmp_a.name
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp_b:
+            tmp_b.write(archivo_b.read())
             tmp_b_path = tmp_b.name
 
-        salida_xlsx, salida_xls = validar_excel(tmp_a_path, tmp_b_path)
+        # Barra de progreso con cuenta regresiva
+        progreso = st.progress(0)
+        cuenta = st.empty()
+        for i in range(5, 0, -1):
+            progreso.progress((5 - i) * 20)
+            cuenta.write(f"⏳ Validando... {i} segundos restantes")
+            time.sleep(1)
+        progreso.progress(100)
+        cuenta.write("✅ Validación completa")
 
-        if salida_xlsx and salida_xls:
-            st.success("✅ Validación completada con éxito.")
-            with open(salida_xlsx, "rb") as f1:
-                st.download_button("📥 Descargar en .xlsx (con formato)", f1, file_name=os.path.basename(salida_xlsx))
-            with open(salida_xls, "rb") as f2:
-                st.download_button("📥 Descargar en .xls (sin formato)", f2, file_name=os.path.basename(salida_xls))
-else:
-    st.warning("Por favor, sube **ambos archivos** antes de ejecutar la validación.")
+        # Ejecutar validación
+        archivo_salida = validar_excel(tmp_a_path, tmp_b_path)
+
+        # Botón para descargar
+        with open(archivo_salida, "rb") as f:
+            st.download_button(
+                label="💾 Descargar archivo validado",
+                data=f,
+                file_name="validado.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
 
 
 
