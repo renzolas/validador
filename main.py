@@ -7,7 +7,6 @@ from datetime import datetime
 import re
 import tempfile
 import os
-import time
 
 # === VALIDACIONES POR TIPO ===
 def normalizar_columna(nombre):
@@ -63,7 +62,7 @@ def validar_excel(archivo_a_path, archivo_b_path):
 
     df_b = df_b[df_a.columns]
 
-    wb = load_workbook(archivo_b_path)
+    wb = load_workbook(archivo_b_path, keep_vba=True)  # Soporta .xlsm
     ws = wb.active
     rojo = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
 
@@ -94,11 +93,11 @@ def validar_excel(archivo_a_path, archivo_b_path):
                 celda.fill = rojo
                 celda.comment = Comment(f"Tipo inválido: se esperaba {tipo_esperado}", "Validador")
 
-            # Actualizar barra de progreso
             progreso += 1
             barra.progress(int((progreso / total_celdas) * 100))
 
-    salida = archivo_b_path.replace(".xlsx", "_validado.xlsx")
+    # Guardar siempre como .xlsx (sin macros)
+    salida = os.path.splitext(archivo_b_path)[0] + "_validado.xlsx"
     wb.save(salida)
     return salida
 
@@ -106,17 +105,18 @@ def validar_excel(archivo_a_path, archivo_b_path):
 st.set_page_config(page_title="Validador de Excel", page_icon="📊")
 st.title("📊 Validador de Excel")
 st.markdown("### ¡Bienvenido! 👋")
-st.info("Esta herramienta compara dos archivos Excel, valida datos y resalta errores en **rojo** con comentarios.")
+st.info("Esta herramienta compara dos archivos Excel (.xlsx o .xlsm), valida datos y resalta errores en **rojo** con comentarios. "
+        "El archivo resultante siempre se descargará en formato `.xlsx` sin macros.")
 
-# Subir archivos
-archivo_a = st.file_uploader("📂 Sube el archivo A (referencia)", type=["xlsx"])
-archivo_b = st.file_uploader("📂 Sube el archivo B (validar)", type=["xlsx"])
+# Subir archivos (acepta .xlsx y .xlsm)
+archivo_a = st.file_uploader("📂 Sube el archivo A (referencia)", type=["xlsx", "xlsm"])
+archivo_b = st.file_uploader("📂 Sube el archivo B (validar)", type=["xlsx", "xlsm"])
 
 # Botón de validación
 if archivo_a and archivo_b:
     if st.button("🚀 Ejecutar validación"):
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp_a, \
-             tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp_b:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(archivo_a.name)[1]) as tmp_a, \
+             tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(archivo_b.name)[1]) as tmp_b:
             tmp_a.write(archivo_a.read())
             tmp_b.write(archivo_b.read())
             tmp_a_path = tmp_a.name
@@ -134,5 +134,6 @@ if archivo_a and archivo_b:
                 )
 else:
     st.warning("Por favor, sube **ambos archivos** antes de ejecutar la validación.")
+
 
 
