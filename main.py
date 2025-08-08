@@ -1,114 +1,69 @@
+import streamlit as st
 import pandas as pd
-from openpyxl import load_workbook
-from openpyxl.styles import PatternFill
-from openpyxl.comments import Comment
-from datetime import datetime
 import re
-import os
+from io import BytesIO
 
-# === INSTRUCCIONES ===
-INSTRUCCIONES = """
-INSTRUCCIONES DE USO:
-1. Colocar en la misma carpeta los archivos A.xlsx (referencia) y B.xlsx o B.xlsm (a validar).
-2. Ambos archivos deben tener:
-   - Mismas columnas.
-   - Mismo orden de columnas.
-   - Encabezados sin modificar.
-3. El validador revisará:
-   - Coincidencia exacta de valores.
-   - Tipos de datos esperados:
-        numerico     → solo dígitos
-        texto        → solo letras y espacios
-        alfanumerico → letras y números
-        fecha        → formato MM/DD/YYYY
-        fecha_corta  → formato MM/YY
-4. El resultado se guardará como "validado.xlsx".
-"""
-
-print(INSTRUCCIONES)
-
-# === FUNCIONES DE VALIDACIÓN ===
-def normalizar_columna(nombre):
-    return str(nombre).strip().lower()
-
-def es_numerico(valor):
-    return valor.isdigit()
-
-def es_texto(valor):
-    return bool(re.match(r"^[a-zA-ZáéíóúÁÉÍÓÚüÜñÑ\s]+$", valor))
-
-def es_alfanumerico(valor):
-    return bool(re.match(r"^[a-zA-Z0-9\s]+$", valor))
-
-def es_fecha(valor):
+# ==============================
+# Función de validación
+# ==============================
+def validar_excel(file_a, file_b):
     try:
-        datetime.strptime(valor, "%m/%d/%Y")
-        return True
-    except:
-        return False
+        # Cargar ambos archivos
+        df_a = pd.read_excel(file_a, dtype=str)
+        df_b = pd.read_excel(file_b, dtype=str)
 
-def es_fecha_corta(valor):
-    return bool(re.match(r"^(0[1-9]|1[0-2])\/\d{2}$", valor))
+        # Validar que tengan las mismas columnas en el mismo orden
+        if list(df_a.columns) != list(df_b.columns):
+            return None, "❌ Los archivos no tienen las mismas columnas o el mismo orden. Verifica que no se hayan modificado."
 
-validadores = {
-    "numerico": es_numerico,
-    "texto": es_texto,
-    "alfanumerico": es_alfanumerico,
-    "fecha": es_fecha,
-    "fecha_corta": es_fecha_corta
-}
+        # Ejemplo de validación: Columna 'vendor style' con formato específico
+        if "vendor style" in df_b.columns:
+            patron = r"^[A-Za-z0-9]+$"  # solo letras y números sin espacios
+            df_b["vendor style_valido"] = df_b["vendor style"].apply(lambda x: bool(re.match(patron, str(x))))
 
-# Tipos esperados por columna (puedes editar según tu necesidad)
-tipos_columna = {
-    "id": "numerico",
-    "nombre": "texto",
-    "codigo": "alfanumerico",
-    "fecha": "fecha",
-    "mes": "fecha_corta"
-}
+        # Guardar archivo validado en memoria
+        output = BytesIO()
+        df_b.to_excel(output, index=False, engine="openpyxl")
+        output.seek(0)
+        return output, "✅ Validación completada con éxito."
 
-# === CARGA DE ARCHIVOS ===
-archivo_A = "A.xlsx"
-archivo_B = None
-for ext in ["B.xlsx", "B.xlsm"]:
-    if os.path.exists(ext):
-        archivo_B = ext
-        break
+    except Exception as e:
+        return None, f"⚠️ Error al procesar los archivos: {e}"
 
-df_A = pd.read_excel(archivo_A, dtype=str)
-df_B = pd.read_excel(archivo_B, dtype=str)
+# ==============================
+# Interfaz Streamlit
+# ==============================
+st.set_page_config(page_title="Validador de Excel", page_icon="📊")
 
-# === VALIDAR ESTRUCTURA DE COLUMNAS ===
-cols_A = [normalizar_columna(c) for c in df_A.columns]
-cols_B = [normalizar_columna(c) for c in df_B.columns]
+st.title("📊 Validador de Archivos Excel")
+st.write("""
+### Instrucciones de uso:
+1. Sube **dos archivos Excel**:  
+   - **Archivo A**: referencia original (no modificado).  
+   - **Archivo B**: archivo a validar.  
+2. Ambos deben tener:
+   - Las **mismas columnas** en el **mismo orden**.  
+   - No deben haberse eliminado ni añadido columnas.  
+3. Se permite subir archivos `.xlsx` o `.xlsm` (Excel con macros).
+4. El resultado validado se descargará en formato `.xlsx` como **validado.xlsx**.
+""")
 
-if cols_A != cols_B:
-    raise ValueError("❌ Las columnas no coinciden o el orden ha sido alterado.")
+# Subida de archivos
+archivo_a = st.file_uploader("📁 Sube el archivo A (referencia)", type=["xlsx", "xlsm"])
+archivo_b = st.file_uploader("📁 Sube el archivo B (a validar)", type=["xlsx", "xlsm"])
 
-# === PROCESAR VALIDACIÓN ===
-wb = load_workbook(archivo_B)
-ws = wb.active
-fill_rojo = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
+if archivo_a and archivo_b:
+    if st.button("▶️ Validar Archivos"):
+        salida, mensaje = validar_excel(archivo_a, archivo_b)
+        st.write(mensaje)
 
-for col_idx, col_name in enumerate(df_B.columns, start=1):
-    tipo_esperado = tipos_columna.get(normalizar_columna(col_name))
-    for row_idx, valor in enumerate(df_B[col_name], start=2):
-        valor_str = str(valor).strip() if pd.notna(valor) else ""
-        error_msg = None
-
-        if valor_str != str(df_A.iloc[row_idx - 2, col_idx - 1]).strip():
-            error_msg = "Valor diferente al archivo A"
-
-        if tipo_esperado and valor_str and not validadores[tipo_esperado](valor_str):
-            error_msg = f"No cumple el formato {tipo_esperado}"
-
-        if error_msg:
-            ws.cell(row=row_idx, column=col_idx).fill = fill_rojo
-            ws.cell(row=row_idx, column=col_idx).comment = Comment(error_msg, "Validador")
-
-# === GUARDAR RESULTADO ===
-wb.save("validado.xlsx")
-print("✅ Validación completada. Archivo guardado como 'validado.xlsx'.")
+        if salida:
+            st.download_button(
+                label="💾 Descargar archivo validado",
+                data=salida,
+                file_name="validado.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
 
 
 
