@@ -4,28 +4,23 @@ from openpyxl.styles import PatternFill
 from openpyxl.comments import Comment
 from datetime import datetime
 import re
-import time
-from google.colab import files
-from tqdm import tqdm
+import os
 
-# === INSTRUCCIONES DE USO ===
-print("""
-📄 INSTRUCCIONES DE USO:
-1️⃣ Sube primero el archivo A (referencia) y luego el archivo B (a validar).
-2️⃣ Ambos archivos deben tener:
-    - Exactamente las mismas columnas.
-    - El mismo orden de columnas.
-    - Los mismos encabezados (sin cambiar nombres).
-3️⃣ Los valores serán validados según el tipo de dato esperado:
-    - numérico: solo números
-    - texto: solo letras y espacios
-    - alfanumérico: letras y números
-    - fecha: formato MM/DD/YYYY
-    - fecha corta: formato MM/YY
-4️⃣ El archivo validado se descargará como 'validado.xlsx' con celdas rojas si hay errores.
-""")
+# ==========================================================
+# INSTRUCCIONES DE USO
+# ==========================================================
+# 1️⃣ Guarda este script en la misma carpeta que tus archivos A y B.
+# 2️⃣ A debe ser el archivo de referencia (el correcto).
+# 3️⃣ B es el archivo que quieres validar.
+# 4️⃣ Ambos deben ser .xlsx y tener las MISMAS columnas, en el mismo orden, sin alterar nombres.
+# 5️⃣ El script verificará:
+#     - Que las columnas no hayan sido cambiadas ni reordenadas.
+#     - Que los valores coincidan con el archivo A.
+#     - Que los datos cumplan con el tipo esperado (numérico, texto, alfanumérico, fecha, fecha corta).
+# 6️⃣ El resultado se guardará como "Validado.xlsx" con celdas en rojo donde haya errores.
+# ==========================================================
 
-# === FUNCIONES DE VALIDACIÓN ===
+# === Funciones de validación ===
 def normalizar_columna(nombre):
     return str(nombre).strip().lower()
 
@@ -48,6 +43,7 @@ def es_fecha(valor):
 def es_fecha_corta(valor):
     return bool(re.match(r"^(0[1-9]|1[0-2])\/\d{2}$", valor))
 
+# Diccionario de validadores
 validadores = {
     "numerico": es_numerico,
     "texto": es_texto,
@@ -56,7 +52,7 @@ validadores = {
     "fecha_corta": es_fecha_corta
 }
 
-# === TIPOS ESPERADOS POR COLUMNA (modificar según tus datos) ===
+# === Configura aquí los tipos esperados por columna ===
 tipos_columna = {
     "id": "numerico",
     "nombre": "texto",
@@ -65,43 +61,38 @@ tipos_columna = {
     "mes": "fecha_corta"
 }
 
-# === SUBIDA DE ARCHIVOS ===
-print("\n📁 Sube primero el archivo A (referencia)")
-archivo_a = files.upload()
-archivo_a = list(archivo_a.keys())[0]
+# === Rutas de archivos ===
+archivo_a = "A.xlsx"  # Referencia
+archivo_b = "B.xlsx"  # Archivo a validar
 
-print("\n📁 Ahora sube el archivo B (a validar)")
-archivo_b = files.upload()
-archivo_b = list(archivo_b.keys())[0]
+if not os.path.exists(archivo_a) or not os.path.exists(archivo_b):
+    raise FileNotFoundError("❌ No se encontraron los archivos A.xlsx y B.xlsx en la carpeta.")
 
-# === CARGA DE DATAFRAMES ===
+# === Cargar como DataFrames ===
 df_a = pd.read_excel(archivo_a, dtype=str)
 df_b = pd.read_excel(archivo_b, dtype=str)
 
-# === NORMALIZA ENCABEZADOS ===
+# Normalizar encabezados
 df_a.columns = [normalizar_columna(col) for col in df_a.columns]
 df_b.columns = [normalizar_columna(col) for col in df_b.columns]
 
-# === VALIDA COLUMNAS ===
+# Validar que tengan las mismas columnas
 if list(df_a.columns) != list(df_b.columns):
-    raise ValueError("❌ Las columnas no coinciden o no están en el mismo orden.")
+    raise ValueError("❌ Las columnas no coinciden o están en diferente orden. No se puede validar.")
 
-# === ABRE ARCHIVO B COMO LIBRO DE EXCEL ===
+# Cargar archivo B en openpyxl
 wb = load_workbook(archivo_b)
 ws = wb.active
 
 rojo = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
 
-# === VALIDACIÓN CELDA POR CELDA CON PROGRESO Y COUNTDOWN ===
-total_celdas = df_a.shape[0] * df_a.shape[1]
-print("\n🔍 Validando datos...")
-for i in tqdm(range(df_a.shape[0]), desc="Progreso", unit="fila"):
-    time.sleep(0.05)  # Simula tiempo de validación
-    for j in range(df_a.shape[1]):
-        valor_a = str(df_a.iat[i, j]).strip()
-        valor_b = str(df_b.iat[i, j]).strip()
-        col_name = df_a.columns[j]
-        celda = ws.cell(row=i+2, column=j+1)
+# === Validación celda por celda ===
+for fila in range(df_a.shape[0]):
+    for col in range(df_a.shape[1]):
+        valor_a = str(df_a.iat[fila, col]).strip() if pd.notna(df_a.iat[fila, col]) else ""
+        valor_b = str(df_b.iat[fila, col]).strip() if pd.notna(df_b.iat[fila, col]) else ""
+        col_name = df_a.columns[col]
+        celda = ws.cell(row=fila+2, column=col+1)
 
         tipo_esperado = tipos_columna.get(col_name)
 
@@ -111,7 +102,7 @@ for i in tqdm(range(df_a.shape[0]), desc="Progreso", unit="fila"):
             celda.comment = Comment("Celda vacía", "Validador")
             continue
 
-        # Valor distinto
+        # Diferente al valor esperado
         if valor_a != valor_b:
             celda.fill = rojo
             celda.comment = Comment(
@@ -119,25 +110,16 @@ for i in tqdm(range(df_a.shape[0]), desc="Progreso", unit="fila"):
                 "Validador"
             )
 
-        # Tipo de dato inválido
+        # Validación de tipo
         if tipo_esperado in validadores:
             if not validadores[tipo_esperado](valor_b):
                 celda.fill = rojo
-                celda.comment = Comment(f"Tipo inválido: se esperaba {tipo_esperado}", "Validador")
+                mensaje = f"Tipo inválido: se esperaba {tipo_esperado}"
+                celda.comment = Comment(mensaje, "Validador")
 
-# === GUARDA ARCHIVO VALIDADO ===
-output_name = "validado.xlsx"
-wb.save(output_name)
-
-# === COUNTDOWN FINAL ===
-print("\n⏳ Finalizando y preparando descarga...")
-for t in range(3, 0, -1):
-    print(f"📦 Descargando en {t}...")
-    time.sleep(1)
-
-# === DESCARGA ===
-files.download(output_name)
-print("\n✅ Validación finalizada. Archivo 'validado.xlsx' listo.")
+# Guardar archivo validado
+wb.save("Validado.xlsx")
+print("✅ Validación completada. Revisa el archivo 'Validado.xlsx'")
 
 
 
