@@ -1,86 +1,79 @@
 import streamlit as st
 import pandas as pd
-import re
-from io import BytesIO
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill
 from openpyxl.comments import Comment
+import io
 
-# ==============================
-# Función de validación con formato
-# ==============================
-def validar_excel(file_a, file_b):
-    try:
-        # Leer datos en DataFrames para comparación
-        df_a = pd.read_excel(file_a, dtype=str)
-        df_b = pd.read_excel(file_b, dtype=str)
+# ======================
+# CONFIGURACIÓN STREAMLIT
+# ======================
+st.set_page_config(page_title="Validador de Archivos", layout="centered")
+st.title("📊 Validador de coincidencias entre archivos Excel")
 
-        # Validar columnas en el mismo orden
-        if list(df_a.columns) != list(df_b.columns):
-            return None, "❌ Los archivos no tienen las mismas columnas o el mismo orden."
+# ======================
+# FUNCIONES
+# ======================
 
-        # Cargar archivo B con openpyxl para mantener formato
-        file_b.seek(0)
-        wb = load_workbook(file_b)
-        ws = wb.active
+# Validar extensión
+def validar_extension(nombre_archivo):
+    return nombre_archivo.lower().endswith(('.xlsx', '.xlsm'))
 
-        # Definir formato de resaltado
-        fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
+# Función para comparar celdas y resaltar diferencias
+def comparar_y_resaltar(archivo_a, archivo_b):
+    # Leer archivos con openpyxl (pandas para DataFrames)
+    df_a = pd.read_excel(archivo_a, dtype=str, engine="openpyxl")
+    df_b = pd.read_excel(archivo_b, dtype=str, engine="openpyxl")
 
-        # Recorrer y comparar celda por celda
-        for row in range(2, ws.max_row + 1):  # Empieza en 2 para saltar encabezado
-            for col in range(1, ws.max_column + 1):
-                val_a = str(df_a.iloc[row - 2, col - 1]).strip() if pd.notna(df_a.iloc[row - 2, col - 1]) else ""
-                val_b = str(df_b.iloc[row - 2, col - 1]).strip() if pd.notna(df_b.iloc[row - 2, col - 1]) else ""
+    # Convertir NaN a cadena vacía
+    df_a = df_a.fillna("")
+    df_b = df_b.fillna("")
 
-                if val_a != val_b:
-                    cell = ws.cell(row=row, column=col)
-                    cell.fill = fill
-                    cell.comment = Comment("No coincide con referencia", "Validador")
+    # Cargar libro original para modificar formato
+    wb = load_workbook(archivo_a)
+    ws = wb.active
 
-        # Guardar archivo en memoria
-        output = BytesIO()
-        wb.save(output)
-        output.seek(0)
+    # Definir color de relleno para errores
+    rojo = PatternFill(start_color="FF9999", end_color="FF9999", fill_type="solid")
 
-        return output, "✅ Validación completada. Celdas diferentes resaltadas en amarillo con comentarios."
+    # Comparar celda por celda
+    for fila in range(len(df_a)):
+        for col in range(len(df_a.columns)):
+            valor_a = str(df_a.iat[fila, col])
+            valor_b = str(df_b.iat[fila, col]) if fila < len(df_b) else ""
 
-    except Exception as e:
-        return None, f"⚠️ Error al procesar: {e}"
+            if valor_a != valor_b:
+                # Resaltar celda en rojo
+                celda_excel = ws.cell(row=fila+2, column=col+1)  # +2 para ignorar encabezado
+                celda_excel.fill = rojo
+                celda_excel.comment = Comment("No coincide con Archivo B", "Validador")
 
-# ==============================
-# Interfaz Streamlit
-# ==============================
-st.set_page_config(page_title="Validador de Excel", page_icon="📊")
+    # Guardar en memoria
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return output
 
-st.title("📊 Validador de Archivos Excel")
-st.write("""
-### Instrucciones de uso:
-1. Sube **dos archivos Excel**:  
-   - **Archivo A**: referencia original.  
-   - **Archivo B**: archivo a validar.  
-2. Ambos deben tener **las mismas columnas en el mismo orden**.  
-3. El resultado será el archivo B **idéntico** pero con:
-   - Celdas diferentes resaltadas en **amarillo**.  
-   - Comentario en la celda: *"No coincide con referencia"*.  
-4. Se permite subir `.xlsx` o `.xlsm`.
-""")
-
-archivo_a = st.file_uploader("📁 Sube el archivo A (referencia)", type=["xlsx", "xlsm"])
-archivo_b = st.file_uploader("📁 Sube el archivo B (a validar)", type=["xlsx", "xlsm"])
+# ======================
+# SUBIDA DE ARCHIVOS
+# ======================
+archivo_a = st.file_uploader("📂 Sube el Archivo A (referencia)", type=["xlsx", "xlsm"])
+archivo_b = st.file_uploader("📂 Sube el Archivo B (comparar)", type=["xlsx", "xlsm"])
 
 if archivo_a and archivo_b:
-    if st.button("▶️ Validar Archivos"):
-        salida, mensaje = validar_excel(archivo_a, archivo_b)
-        st.write(mensaje)
+    if validar_extension(archivo_a.name) and validar_extension(archivo_b.name):
+        if st.button("🔍 Validar Archivos"):
+            resultado = comparar_y_resaltar(archivo_a, archivo_b)
+            st.success("✅ Comparación completada")
 
-        if salida:
             st.download_button(
-                label="💾 Descargar archivo validado",
-                data=salida,
-                file_name="validado.xlsx",
+                label="📥 Descargar archivo con errores resaltados",
+                data=resultado,
+                file_name="resultado_validacion.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
+    else:
+        st.error("❌ Solo se permiten archivos con extensión .xlsx o .xlsm")
 
 
 
