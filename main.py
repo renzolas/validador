@@ -75,9 +75,6 @@ for ext in ["B.xlsx", "B.xlsm"]:
         archivo_B = ext
         break
 
-if not os.path.exists(archivo_A) or not archivo_B:
-    raise FileNotFoundError("❌ No se encontraron los archivos A.xlsx y B.xlsx o B.xlsm en la carpeta.")
-
 df_A = pd.read_excel(archivo_A, dtype=str)
 df_B = pd.read_excel(archivo_B, dtype=str)
 
