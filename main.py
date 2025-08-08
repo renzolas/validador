@@ -7,6 +7,7 @@ from datetime import datetime
 import re
 import tempfile
 import os
+import time
 
 # === VALIDACIONES POR TIPO ===
 def normalizar_columna(nombre):
@@ -58,17 +59,19 @@ def validar_excel(archivo_a_path, archivo_b_path):
     faltantes = set(df_a.columns) - set(df_b.columns)
     if faltantes:
         st.error(f"❌ Faltan columnas en B: {faltantes}")
-        return None
+        return None, None
 
     df_b = df_b[df_a.columns]
 
-    wb = load_workbook(archivo_b_path, keep_vba=True)  # Soporta .xlsm
+    wb = load_workbook(archivo_b_path, keep_vba=True)
     ws = wb.active
     rojo = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
 
     total_celdas = df_a.shape[0] * df_a.shape[1]
     progreso = 0
     barra = st.progress(0)
+    tiempo_estimado = total_celdas * 0.02  # 0.02 seg por celda aprox
+    texto_tiempo = st.empty()
 
     for fila in range(df_a.shape[0]):
         for col in range(df_a.shape[1]):
@@ -94,25 +97,33 @@ def validar_excel(archivo_a_path, archivo_b_path):
                 celda.comment = Comment(f"Tipo inválido: se esperaba {tipo_esperado}", "Validador")
 
             progreso += 1
-            barra.progress(int((progreso / total_celdas) * 100))
+            porcentaje = int((progreso / total_celdas) * 100)
+            barra.progress(porcentaje)
+            tiempo_restante = tiempo_estimado * (1 - progreso / total_celdas)
+            texto_tiempo.text(f"⏳ Tiempo estimado restante: {tiempo_restante:.1f} segundos")
 
-    # Guardar siempre como .xlsx (sin macros)
-    salida = os.path.splitext(archivo_b_path)[0] + "_validado.xlsx"
-    wb.save(salida)
-    return salida
+            time.sleep(0.002)  # Simulación ligera para que se vea el avance
+
+    # Guardar con formato (.xlsx)
+    salida_xlsx = os.path.splitext(archivo_b_path)[0] + "_validado.xlsx"
+    wb.save(salida_xlsx)
+
+    # Guardar sin formato como .xls
+    salida_xls = os.path.splitext(archivo_b_path)[0] + "_validado.xls"
+    df_b.to_excel(salida_xls, index=False)
+
+    return salida_xlsx, salida_xls
 
 # === STREAMLIT UI ===
 st.set_page_config(page_title="Validador de Excel", page_icon="📊")
 st.title("📊 Validador de Excel")
 st.markdown("### ¡Bienvenido! 👋")
 st.info("Esta herramienta compara dos archivos Excel (.xlsx o .xlsm), valida datos y resalta errores en **rojo** con comentarios. "
-        "El archivo resultante siempre se descargará en formato `.xlsx` sin macros.")
+        "El archivo resultante puede descargarse en `.xlsx` (con formato) o `.xls` (sin formato, pero compatible con más sistemas).")
 
-# Subir archivos (acepta .xlsx y .xlsm)
 archivo_a = st.file_uploader("📂 Sube el archivo A (referencia)", type=["xlsx", "xlsm"])
 archivo_b = st.file_uploader("📂 Sube el archivo B (validar)", type=["xlsx", "xlsm"])
 
-# Botón de validación
 if archivo_a and archivo_b:
     if st.button("🚀 Ejecutar validación"):
         with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(archivo_a.name)[1]) as tmp_a, \
@@ -122,16 +133,14 @@ if archivo_a and archivo_b:
             tmp_a_path = tmp_a.name
             tmp_b_path = tmp_b.name
 
-        salida = validar_excel(tmp_a_path, tmp_b_path)
+        salida_xlsx, salida_xls = validar_excel(tmp_a_path, tmp_b_path)
 
-        if salida:
+        if salida_xlsx and salida_xls:
             st.success("✅ Validación completada con éxito.")
-            with open(salida, "rb") as f:
-                st.download_button(
-                    "📥 Descargar archivo validado",
-                    f,
-                    file_name=os.path.basename(salida)
-                )
+            with open(salida_xlsx, "rb") as f1:
+                st.download_button("📥 Descargar en .xlsx (con formato)", f1, file_name=os.path.basename(salida_xlsx))
+            with open(salida_xls, "rb") as f2:
+                st.download_button("📥 Descargar en .xls (sin formato)", f2, file_name=os.path.basename(salida_xls))
 else:
     st.warning("Por favor, sube **ambos archivos** antes de ejecutar la validación.")
 
