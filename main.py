@@ -21,7 +21,7 @@ def validar_extension(nombre_archivo):
 
 # Función para comparar celdas y resaltar diferencias
 def comparar_y_resaltar(archivo_a, archivo_b):
-    # Leer archivos con openpyxl (pandas para DataFrames)
+    # Leer archivos con pandas
     df_a = pd.read_excel(archivo_a, dtype=str, engine="openpyxl")
     df_b = pd.read_excel(archivo_b, dtype=str, engine="openpyxl")
 
@@ -46,7 +46,10 @@ def comparar_y_resaltar(archivo_a, archivo_b):
                 # Resaltar celda en rojo
                 celda_excel = ws.cell(row=fila+2, column=col+1)  # +2 para ignorar encabezado
                 celda_excel.fill = rojo
-                celda_excel.comment = Comment("No coincide con Archivo B", "Validador")
+
+                # Comentario detallado
+                comentario_texto = f'Se esperaba encontrar "{valor_a}" y se encontró "{valor_b}"'
+                celda_excel.comment = Comment(comentario_texto, "Validador")
 
     # Guardar en memoria
     output = io.BytesIO()
