@@ -151,6 +151,6 @@ if archivo_a and archivo_b:
 
 # Botón de refresco para reiniciar la carga de archivos
 if st.button("🔄 Refrescar y cargar otros archivos"):
-    st.experimental_rerun()
+    st.rerun()
 
 
