@@ -149,8 +149,5 @@ if archivo_a and archivo_b:
     else:
         st.error("❌ Solo se permiten archivos con extensión .xlsx o .xlsm")
 
-# Botón de refresco para reiniciar la carga de archivos
-if st.button("🔄 Refrescar y cargar otros archivos"):
-    st.rerun()
 
 
